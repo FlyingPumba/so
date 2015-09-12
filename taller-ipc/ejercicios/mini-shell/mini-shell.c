@@ -17,34 +17,96 @@
 
 int run(char *program_name[], char **program_argv[], unsigned int count) {
 
-    int child;
-    char buf[1024];
+    //char buf[1024];
+    int comm[count][2];
+    int status;
+    /*int save_in = dup(STDIN_FILENO);
+    int save_out = dup(STDOUT_FILENO);*/
 
+    // creo los count pipes
     for (int i = 0; i < count; ++i) {
-        child = fork();
-        if (child == -1)
-            perror("fork");
+        pipe(comm[i]);
+    }
 
-        if(dup2(STDIN_FILENO, STDOUT_FILENO) == -1) {
-            perror("dup2");
-            exit(1);
-        }
-        //fflush(stdout);
-
-        if (child == 0) {
-            // estoy en el hijo
-            execv(program_name[i], program_argv[i]);
-            exit(0);
-        } else {
-            int status;
-            wait(&status);
-            // el hijo ya termino de ejecutar
+    // creo los count-1 procesos (ya que el proceso padre es el cero)
+    int i;
+    int parent = getpid();
+    int child[count-1];
+    for (i = 0; i < count-1; ++i) {
+        child[i] = fork();
+        if (child[i] == 0) {
+            break;
         }
     }
 
-    // imprimo el resultado final
-    read(STDOUT_FILENO, buf, 1024);
-    printf("%s\n", buf);
+    // cierro todos los pipes que no le sirven a este proceso
+    for (int j = 0; j < count; ++j) {
+        if (j == i) {
+            close(comm[j][1]);
+        } else if (j == (i+1)%count) {
+            close(comm[j][0]);
+        } else {
+            close(comm[j][0]);
+            close(comm[j][1]);
+        }
+    }
+
+    if (i == count-1) {
+        // el padre ejecuta el primer programa sin input y pasa el output al segundo programa (i = 0)
+        close(comm[count-1][0]);
+        if (dup2(comm[0][1], STDOUT_FILENO) == -1) {
+            fprintf(stderr, "dup2: %s %d\n", strerror(errno), i);
+        }
+        execv(program_name[0], program_argv[0]);
+        if (fflush(stdout) == -1) {
+            fprintf(stderr, "fflush: %s %d\n", strerror(errno), i);
+        }
+        close(comm[0][1]);
+        exit(0);
+    } else if (i == 0) {
+        // el segundo programa espera el output del primer programa (padre) y lo pasa al tercer programa (i = 1)
+        waitpid(parent, &status, 0);
+        if (dup2(comm[i][0], STDIN_FILENO) == -1) {
+            fprintf(stderr, "dup2: %s %d\n", strerror(errno), i);
+        }
+        if (dup2(comm[(i+1)%(count-1)][1], STDOUT_FILENO) == -1) {
+            fprintf(stderr, "dup2: %s %d\n", strerror(errno), i);
+        }
+        execv(program_name[i+1], program_argv[i+1]);
+        if (fflush(stdout) == -1) {
+            fprintf(stderr, "fflush: %s %d\n", strerror(errno), i);
+        }
+        close(comm[i][0]);
+        close(comm[(i+1)%(count-1)][1]);
+        exit(0);
+    } else if (i == count-2) {
+        waitpid(child[count-3], &status, 0);
+        // el ultimo programa espera el output del anteultimo e imprime en pantalla
+        if (dup2(comm[i][0], STDIN_FILENO) == -1) {
+            fprintf(stderr, "dup2: %s %d\n", strerror(errno), i);
+        }
+        execv(program_name[i+1], program_argv[i+1]);
+        if (fflush(stdout) == -1) {
+            fprintf(stderr, "fflush: %s %d\n", strerror(errno), i);
+        }
+        close(comm[i][0]);
+        close(comm[(i+1)%(count-1)][1]);
+    } else {
+        // el programa i espera el input del programa i-1, y pasa su output al programa i+1
+        waitpid(child[i-1], &status, 0);
+        if (dup2(comm[i][0], STDIN_FILENO) == -1) {
+            fprintf(stderr, "dup2: %s %d\n", strerror(errno), i);
+        }
+        if (dup2(comm[(i+1)%(count-1)][1], STDOUT_FILENO) == -1) {
+            fprintf(stderr, "dup2: %s %d\n", strerror(errno), i);
+        }
+        execv(program_name[i+1], program_argv[i+1]);
+        if (fflush(stdout) == -1) {
+            fprintf(stderr, "fflush: %s %d\n", strerror(errno), i);
+        }
+        close(comm[i][0]);
+        close(comm[(i+1)%(count-1)][1]);
+    }
 
     return 0;
 }

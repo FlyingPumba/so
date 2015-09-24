@@ -313,6 +313,7 @@ unsigned int Ext2FS::get_block_address(struct Ext2FSInode * inode, unsigned int 
 	// cout << "get_block_address, number:" << block_number << endl;
 	if (block_number < 12) {
 		return inode->block[block_number];
+		// cout << "El bloque " << block_number << " es de nivel 0" << endl;
 	} else {
 		// el bloque esta en algun puntero de indireccion
 		block_number -= 12;
@@ -324,29 +325,38 @@ unsigned int Ext2FS::get_block_address(struct Ext2FSInode * inode, unsigned int 
 
 		if (block_number < punteros_en_bloque_level_1) {
 			// el bloque que nos piden está en el primer puntero de indireccion
+			// cout << "El bloque " << block_number << " es de nivel 1" << endl;
 			return get_block_address_aux(1, inode->block[12], block_number);
 		} else if (block_number < punteros_en_bloque_level_2) {
 			// el bloque que nos piden está en el segundo puntero de indireccion
 			block_number -= punteros_en_bloque_level_1;
+			// cout << "El bloque " << block_number << " es de nivel 2" << endl;
 			return get_block_address_aux(2, inode->block[13], block_number);
 		} else {
 			// el bloque que nos piden está en el tercer puntero de indireccion
 			block_number -= punteros_en_bloque_level_2;
+			// cout << "El bloque " << block_number << " es de nivel 3" << endl;
 			return get_block_address_aux(3, inode->block[14], block_number);
 		}
 	}
 }
 
 unsigned int Ext2FS::get_block_address_aux(unsigned int level, unsigned int block_address, unsigned int block_number) {
+	// cout << "get_block_address_aux, number:" << block_number << " from address: " << block_address << endl;
 	unsigned int block_size = 1024 << _superblock->log_block_size;
 	if (level == 1) {
 		unsigned char buffer[block_size];
 		read_block(block_address, buffer);
-		return (unsigned int)buffer[block_number*sizeof(int)];
+		unsigned int *aux = (unsigned int *)buffer;
+		// cout << aux[block_number] << endl;
+		return aux[block_number];
+
+		// return (unsigned int)buffer[block_number*sizeof(int)];
 	} else {
 		unsigned char buffer[block_size];
 		read_block(block_address, buffer);
-		block_address = (unsigned int)buffer[block_number*sizeof(int)];
+		unsigned int *aux = (unsigned int *)buffer;
+		block_address = aux[block_number];
 
 		unsigned int punteros_en_bloque_level_0 = block_size / sizeof(int);
 		block_number /= punteros_en_bloque_level_0;
@@ -433,7 +443,7 @@ fd_t Ext2FS::open(const char * path, const char * mode)
 	// We ignore mode
 	struct Ext2FSInode * inode = inode_for_path(path);
 	assert(inode != NULL);
-	std::cerr << *inode << std::endl;
+	// std::cerr << *inode << std::endl;
 
 	if(inode == NULL)
 		return -1;
@@ -489,7 +499,7 @@ int Ext2FS::write(fd_t filedesc, const unsigned char * buffer, int size)
 
 int Ext2FS::seek(fd_t filedesc, int offset)
 {
-	std::cerr << "offset: " << offset << " size: " << _open_files[filedesc].size << std::endl;
+	// std::cerr << "offset: " << offset << " size: " << _open_files[filedesc].size << std::endl;
 	int position = offset;
 	if(offset < 0)
 		position = _open_files[filedesc].size + offset;

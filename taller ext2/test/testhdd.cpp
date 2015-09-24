@@ -49,9 +49,9 @@ void test_read_file(Ext2FS * fs) {
 	// busco el archivo /grupos/gNUMERO/nota.txt
 	fd_t file_fd = fs->open("/grupos/g5/nota.txt", "r");
 	unsigned char buffer[17];
-	fs->seek(file_fd, 14000);
+	fs->seek(file_fd, 13999);
 	fs->read(file_fd, buffer, 17);
-	cout << "Mensaje:" << buffer << endl;
+	cout << endl << "Mensaje:" << buffer << endl;
 	fs->close(file_fd);
 }
 

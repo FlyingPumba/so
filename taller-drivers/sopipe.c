@@ -23,15 +23,18 @@ static loff_t writeptr = 0;
 
 static dev_t devno = MKDEV(0,0);
 
-static __init int sopipe_init(void)
-{
+static __init int sopipe_init(void) {
   int err;
 
   cdev_init(&dev, &sopipe_fops);
   dev.owner = THIS_MODULE;
   dev.ops = &sopipe_fops;
-  
+
   // Inicializo semáforo, spinlock y buffer
+  sema_init(&sem, 0);
+  spin_lock_init(&data_lock);
+  data_size = 32;
+  data = vmalloc(data_size);
 
   /* dynamically get a MAJOR and MINOR */
   err = alloc_chrdev_region(&devno, 0, 1, "sopipe");
@@ -56,64 +59,52 @@ out_noregion:
   return -EIO;
 }
 
-// Función auxiliar que se encarga de leer del buffer
-// y avanzar los punteros apropiadamente.
-// Asume que tenemos el lock tomado
-static int __sopipe_read(unsigned char * c) {
-  if(readptr < writeptr) {
-    *c = data[readptr++];
-    return 0;
-  }
-  // Should not happen
-  return -EIO;
-}
-
-// Función auxiliar que se encarga de escribir en el buffer
-// y avanzar los punteros apropiadamente. Si es necesario,
-// pide más memoria.
-// Asume que tenemos el lock tomado
-static int __sopipe_write(unsigned char c) {
-  unsigned char * temp = NULL;
-  if(writeptr < data_size) {
-    // Tengo lugar en el buffer. Simplemente escribo
-    data[writeptr++] = c;
-    return 0;
-  }
-  // Si no hay más lugar, necesito más lugar
-  // 1) Pido un buffer nuevo más grande que el que tengo
-  // 2) Copio el buffer viejo al buffer nuevo
-  // 3) Libero el buffer viejo
-  // 4) Seteo el nuevo buffer como buffer del módulo
-  // Una vez que tengo todo OK => Escribo en el nuevo buffer
-  data[writeptr++] = c;
-  return 0;
-}
-
-static __exit void sopipe_exit(void)
-{
+static __exit void sopipe_exit(void) {
   cdev_del(&dev);
   unregister_chrdev_region(devno, 1);
   // Libero la memoria del módulo
+  vfree(data);
 }
 
-int sopipe_open(struct inode * inode, struct file * filp)
-{
+int sopipe_open(struct inode * inode, struct file * filp) {
   return 0;
 }
 
-int sopipe_release(struct inode * inode, struct file * filp)
-{
+int sopipe_release(struct inode * inode, struct file * filp) {
   return 0;
 }
 
-ssize_t sopipe_read(struct file * filp, char __user *buff, size_t count, loff_t * offp)
-{
-  // Implementar
+ssize_t sopipe_read(struct file * filp, char __user *buff, size_t count, loff_t * offp) {
+    ssize_t to_read = count;
+    if (writeptr - readptr < to_read) {
+        // la cantidad a leer es mayor de lo que hay escrito
+        to_read = writeptr - readptr;
+    }
+    copy_to_user(buff, data+readptr, to_read);
+    return to_read;
 }
 
-ssize_t sopipe_write(struct file * filp, const char __user *buff, size_t count, loff_t * offp)
-{
-  // Implementar
+ssize_t sopipe_write(struct file * filp, const char __user *buff, size_t count, loff_t * offp) {
+    if (data_size - writeptr < count) {
+        // no hay espacio para escribir lo que me piden:
+        // 1) Pido un buffer nuevo más grande que el que tengo
+        ssize_t new_size = data_size*2;
+        char * aux = vmalloc(new_size);
+        // 2) Copio el buffer viejo al buffer nuevo
+        int i;
+        for (i = 0; i < data_size; i++) {
+            aux[i] = data[i];
+        }
+        // 3) Libero el buffer viejo
+        vfree(data);
+        // 4) Seteo el nuevo buffer como buffer del módulo
+        data = aux;
+        data_size = new_size;
+    }
+    // hay espacio para escribir
+    copy_from_user(data+writeptr, buff, count);
+    writeptr += count;
+    return count;
 }
 
 module_init(sopipe_init);
